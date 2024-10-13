@@ -472,7 +472,7 @@ class FastSAMPrompt:
 
             if blade_edge_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=blade_edge_mask)
-                bld_white_percent = cv2.countNonZero(bld)/cv2.countNonZero(blade_edge_mask)
+                bld_white_percent = cv2.countNonZero(bld)/(cv2.countNonZero(blade_edge_mask) + 0.0001)
                 logging.info(f"{i} bld white: {bld_white_percent} pixels={cv2.countNonZero(bld)}")
                 if bld_white_percent < 0.5:
                     continue
