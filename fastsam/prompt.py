@@ -1,9 +1,14 @@
+import logging
 import os
 import sys
+from itertools import count
+from pickletools import uint8
+
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+
 from .utils import image_to_np_ndarray
 from PIL import Image
 
@@ -16,7 +21,7 @@ class FastSAMPrompt:
         self.device = device
         self.results = results
         self.img = image
-    
+
     def _segment_image(self, image, bbox):
         if isinstance(image, Image.Image):
             image_array = np.array(image)
@@ -51,7 +56,7 @@ class FastSAMPrompt:
             annotations.append(annotation)
         return annotations
 
-    def filter_masks(annotations):  # filte the overlap mask
+    def filter_masks(self, annotations):  # filte the overlap mask
         annotations.sort(key=lambda x: x['area'], reverse=True)
         to_remove = set()
         for i in range(0, len(annotations)):
@@ -84,14 +89,14 @@ class FastSAMPrompt:
         return [x1, y1, x2, y2]
 
     def plot_to_result(self,
-             annotations,
-             bboxes=None,
-             points=None,
-             point_label=None,
-             mask_random_color=True,
-             better_quality=True,
-             retina=False,
-             withContours=True) -> np.ndarray:
+                       annotations,
+                       bboxes=None,
+                       points=None,
+                       point_label=None,
+                       mask_random_color=True,
+                       better_quality=True,
+                       retina=False,
+                       withContours=True) -> np.ndarray:
         if isinstance(annotations[0], dict):
             annotations = [annotation['segmentation'] for annotation in annotations]
         image = self.img
@@ -178,8 +183,8 @@ class FastSAMPrompt:
         result = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
         plt.close()
         return result
-            
-    # Remark for refactoring: IMO a function should do one thing only, storing the image and plotting should be seperated and do not necessarily need to be class functions but standalone utility functions that the user can chain in his scripts to have more fine-grained control. 
+
+    # Remark for refactoring: IMO a function should do one thing only, storing the image and plotting should be seperated and do not necessarily need to be class functions but standalone utility functions that the user can chain in his scripts to have more fine-grained control.
     def plot(self,
              annotations,
              output_path,
@@ -193,13 +198,13 @@ class FastSAMPrompt:
         if len(annotations) == 0:
             return None
         result = self.plot_to_result(
-            annotations, 
-            bboxes, 
-            points, 
-            point_label, 
+            annotations,
+            bboxes,
+            points,
+            point_label,
             mask_random_color,
-            better_quality, 
-            retina, 
+            better_quality,
+            retina,
             withContours,
         )
 
@@ -208,19 +213,19 @@ class FastSAMPrompt:
             os.makedirs(path)
         result = result[:, :, ::-1]
         cv2.imwrite(output_path, result)
-     
+
     #   CPU post process
     def fast_show_mask(
-        self,
-        annotation,
-        ax,
-        random_color=False,
-        bboxes=None,
-        points=None,
-        pointlabel=None,
-        retinamask=True,
-        target_height=960,
-        target_width=960,
+            self,
+            annotation,
+            ax,
+            random_color=False,
+            bboxes=None,
+            points=None,
+            pointlabel=None,
+            retinamask=True,
+            target_height=960,
+            target_width=960,
     ):
         msak_sum = annotation.shape[0]
         height = annotation.shape[1]
@@ -268,16 +273,16 @@ class FastSAMPrompt:
         ax.imshow(show)
 
     def fast_show_mask_gpu(
-        self,
-        annotation,
-        ax,
-        random_color=False,
-        bboxes=None,
-        points=None,
-        pointlabel=None,
-        retinamask=True,
-        target_height=960,
-        target_width=960,
+            self,
+            annotation,
+            ax,
+            random_color=False,
+            bboxes=None,
+            points=None,
+            pointlabel=None,
+            retinamask=True,
+            target_height=960,
+            target_width=960,
     ):
         msak_sum = annotation.shape[0]
         height = annotation.shape[1]
@@ -332,14 +337,13 @@ class FastSAMPrompt:
     def retrieve(self, model, preprocess, elements, search_text: str, device) -> int:
         preprocessed_images = [preprocess(image).to(device) for image in elements]
         try:
-           import clip  # for linear_assignment
-    
-        except (ImportError, AssertionError, AttributeError):
-           from ultralytics.yolo.utils.checks import check_requirements
-    
-           check_requirements('git+https://github.com/openai/CLIP.git')  # required before installing lap from source
-           import clip
+            import clip  # for linear_assignment
 
+        except (ImportError, AssertionError, AttributeError):
+            from ultralytics.yolo.utils.checks import check_requirements
+
+            check_requirements('git+https://github.com/openai/CLIP.git')  # required before installing lap from source
+            import clip
 
         tokenized_text = clip.tokenize([search_text]).to(device)
         stacked_images = torch.stack(preprocessed_images)
@@ -369,7 +373,7 @@ class FastSAMPrompt:
                 filter_id.append(_)
                 continue
             bbox = self._get_bbox_from_mask(mask['segmentation'])  # mask 的 bbox
-            cropped_boxes.append(self._segment_image(image, bbox))  
+            cropped_boxes.append(self._segment_image(image, bbox))
             # cropped_boxes.append(segment_image(image,mask["segmentation"]))
             cropped_images.append(bbox)  # Save the bounding box of the cropped image.
 
@@ -412,7 +416,13 @@ class FastSAMPrompt:
         max_iou_index = list(set(max_iou_index))
         return np.array(masks[max_iou_index].cpu().numpy())
 
-    def point_prompt(self, points, pointlabel):  # numpy 
+    def get_masks(self):
+        if self.results == None:
+            return []
+        masks = self._format_results(self.results[0], 0)
+        return masks
+
+    def point_prompt(self, points, pointlabel):  # numpy
         if self.results == None:
             return []
         masks = self._format_results(self.results[0], 0)
@@ -437,6 +447,42 @@ class FastSAMPrompt:
         onemask = onemask >= 1
         return np.array([onemask])
 
+    def point_prompt_mask(self, foreground, blade_edge_mask=None):  # numpy
+        if self.results is None:
+            return None
+        masks = self._format_results(self.results[0], 0)
+        h = masks[0]['segmentation'].shape[0]
+        w = masks[0]['segmentation'].shape[1]
+        onemask = np.zeros((h, w)).astype(np.uint8)
+        masks = sorted(masks, key=lambda x: x['area'], reverse=True)
+        for i, annotation in enumerate(masks):
+            if type(annotation) == dict:
+                mask = annotation['segmentation']
+            else:
+                mask = annotation
+            this_mask = np.zeros((h, w))
+            this_mask[mask] = 1
+
+            # check if sure background
+            zero_top = cv2.countNonZero(this_mask[-1, :])/w
+            zero_bottom = cv2.countNonZero(this_mask[0, :])/w
+            logging.info(f"{i} zero_top: {zero_top}, zero_bottom: {zero_bottom}")
+            if zero_top > 0.5 or zero_bottom > 0.5:
+                continue
+
+            if blade_edge_mask is not None:
+                bld = cv2.bitwise_and(this_mask, this_mask, mask=blade_edge_mask)
+                bld_white_percent = cv2.countNonZero(bld)/cv2.countNonZero(blade_edge_mask)
+                logging.info(f"{i} bld white: {bld_white_percent} pixels={cv2.countNonZero(bld)}")
+                if bld_white_percent < 0.5:
+                    continue
+
+            intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
+            ovap = int(100 * (cv2.countNonZero(intr) / cv2.countNonZero(this_mask)))
+            if ovap > 10:
+                onemask[mask] = 255
+        return onemask
+
     def text_prompt(self, text):
         if self.results == None:
             return []
@@ -453,4 +499,3 @@ class FastSAMPrompt:
         if self.results == None:
             return []
         return self.results[0].masks.data
-        
