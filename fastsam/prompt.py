@@ -464,23 +464,26 @@ class FastSAMPrompt:
             this_mask[mask] = 1
 
             # check if sure background
-            zero_top = cv2.countNonZero(this_mask[-1, :])/w
-            zero_bottom = cv2.countNonZero(this_mask[0, :])/w
-            logging.info(f"{i} zero_top: {zero_top}, zero_bottom: {zero_bottom}")
+            zero_top = cv2.countNonZero(this_mask[:, 0])/w
+            zero_bottom = cv2.countNonZero(this_mask[:, -1])/w
             if zero_top > 0.5 or zero_bottom > 0.5:
+                logging.info(f"Skipped mask {i} as zero_top={zero_top:.2f}>0.5, zero_bottom={zero_bottom:.2f}>0.5")
                 continue
 
             if blade_edge_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=blade_edge_mask)
                 bld_white_percent = cv2.countNonZero(bld)/(cv2.countNonZero(blade_edge_mask) + 0.0001)
-                logging.info(f"{i} bld white: {bld_white_percent} pixels={cv2.countNonZero(bld)}")
                 if bld_white_percent < 0.5:
+                    logging.info(f"Skipped mask {i} as pixels={cv2.countNonZero(bld)} bld_white_percent={bld_white_percent}<0.5")
                     continue
 
             intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
             ovap = int(100 * (cv2.countNonZero(intr) / cv2.countNonZero(this_mask)))
             if ovap > 10:
                 onemask[mask] = 255
+                logging.info(f"Considered mask {i} as ovap={ovap} >10")
+            else:
+                logging.info(f"Skipped mask {i} as ovap={ovap} <=10")
         return onemask
 
     def text_prompt(self, text):
