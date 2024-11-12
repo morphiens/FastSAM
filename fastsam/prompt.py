@@ -447,7 +447,7 @@ class FastSAMPrompt:
         onemask = onemask >= 1
         return np.array([onemask])
 
-    def point_prompt_mask(self, foreground, blade_edge_mask=None):  # numpy
+    def point_prompt_mask(self, foreground=None, blade_edge_mask=None):  # numpy
         if self.results is None:
             return None
         masks = self._format_results(self.results[0], 0)
@@ -477,9 +477,12 @@ class FastSAMPrompt:
                     logging.info(f"Skipped mask {i} as pixels={cv2.countNonZero(bld)} bld_white_percent={bld_white_percent}<0.5")
                     continue
 
-            intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
-            ovap = int(100 * (cv2.countNonZero(intr) / cv2.countNonZero(this_mask)))
-            if ovap > 10:
+            if foreground is not None:
+                intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
+                ovap = int(100 * (cv2.countNonZero(intr) / cv2.countNonZero(this_mask)))
+                if ovap > 10:
+                    onemask[mask] = 255
+            else:
                 onemask[mask] = 255
                 logging.info(f"Considered mask {i} as ovap={ovap} >10")
             else:
