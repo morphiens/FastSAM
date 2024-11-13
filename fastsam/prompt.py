@@ -484,9 +484,6 @@ class FastSAMPrompt:
                     onemask[mask] = 255
             else:
                 onemask[mask] = 255
-                logging.info(f"Considered mask {i} as ovap={ovap} >10")
-            else:
-                logging.info(f"Skipped mask {i} as ovap={ovap} <=10")
         return onemask
 
     def text_prompt(self, text):
