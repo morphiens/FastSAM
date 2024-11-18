@@ -467,20 +467,21 @@ class FastSAMPrompt:
             zero_top = cv2.countNonZero(this_mask[:, 0])/w
             zero_bottom = cv2.countNonZero(this_mask[:, -1])/w
             if zero_top > 0.5 or zero_bottom > 0.5:
-                logging.info(f"Skipped mask {i} as zero_top={zero_top:.2f}>0.5, zero_bottom={zero_bottom:.2f}>0.5")
+                logging.info(f"1.[Sure BG] Skipped mask {i} as zero_top={zero_top:.2f}>0.5 or zero_bottom={zero_bottom:.2f}>0.5")
                 continue
 
             if blade_edge_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=blade_edge_mask)
                 bld_white_percent = cv2.countNonZero(bld)/(cv2.countNonZero(blade_edge_mask) + 0.0001)
                 if bld_white_percent < 0.5:
-                    logging.info(f"Skipped mask {i} as pixels={cv2.countNonZero(bld)} bld_white_percent={bld_white_percent}<0.5")
+                    logging.info(f"2.[Sure FG] Skipped mask {i} as intersection={cv2.countNonZero(bld)} "
+                                 f"bld_white_percent={bld_white_percent}<0.5")
                     continue
 
             if foreground is not None:
                 intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
                 ovap = int(100 * (cv2.countNonZero(intr) / cv2.countNonZero(this_mask)))
-                if ovap > 10:
+                if ovap > 5:
                     onemask[mask] = 255
             else:
                 onemask[mask] = 255
