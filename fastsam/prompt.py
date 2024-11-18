@@ -447,7 +447,8 @@ class FastSAMPrompt:
         onemask = onemask >= 1
         return np.array([onemask])
 
-    def point_prompt_mask(self, foreground=None, blade_edge_mask=None):  # numpy
+    def point_prompt_mask(self, foreground=None, blade_edge_mask=None,
+                          conf=None, debug_name=""):  # numpy
         if self.results is None:
             return None
         masks = self._format_results(self.results[0], 0)
@@ -455,11 +456,13 @@ class FastSAMPrompt:
         w = masks[0]['segmentation'].shape[1]
         onemask = np.zeros((h, w)).astype(np.uint8)
         masks = sorted(masks, key=lambda x: x['area'], reverse=True)
+        valid_masks = []
         for i, annotation in enumerate(masks):
             if type(annotation) == dict:
                 mask = annotation['segmentation']
             else:
                 mask = annotation
+
             this_mask = np.zeros((h, w))
             this_mask[mask] = 1
 
@@ -467,14 +470,14 @@ class FastSAMPrompt:
             zero_top = cv2.countNonZero(this_mask[:, 0])/w
             zero_bottom = cv2.countNonZero(this_mask[:, -1])/w
             if zero_top > 0.5 or zero_bottom > 0.5:
-                logging.info(f"1.[Sure BG] Skipped mask {i} as zero_top={zero_top:.2f}>0.5 or zero_bottom={zero_bottom:.2f}>0.5")
+                logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as zero_top={zero_top:.2f}>0.5 or zero_bottom={zero_bottom:.2f}>0.5")
                 continue
 
             if blade_edge_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=blade_edge_mask)
                 bld_white_percent = cv2.countNonZero(bld)/(cv2.countNonZero(blade_edge_mask) + 0.0001)
                 if bld_white_percent < 0.5:
-                    logging.info(f"2.[Sure FG] Skipped mask {i} as intersection={cv2.countNonZero(bld)} "
+                    logging.info(f"2.[Sure FG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
                                  f"bld_white_percent={bld_white_percent}<0.5")
                     continue
 
@@ -482,8 +485,23 @@ class FastSAMPrompt:
                 intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
                 ovap = int(100 * (cv2.countNonZero(intr) / cv2.countNonZero(this_mask)))
                 if ovap > 5:
-                    onemask[mask] = 255
+                    # onemask[mask] = 255
+                    valid_masks.append(i)
             else:
+                # onemask[mask] = 255
+                valid_masks.append(i)
+
+        scores = [m.get('score', 0) for i, m in enumerate(masks) if i in valid_masks]
+        adaptive_score = 0
+        if len(scores) > 1:
+            adaptive_score = float(min(scores) + (max(scores) - min(scores)) * 0.8)
+        logging.info(f"valid_masks {debug_name} {valid_masks} {[round(float(a), 2) for a in scores]} {adaptive_score}")
+        for i, annotation in enumerate(masks):
+            if type(annotation) == dict:
+                mask = annotation['segmentation']
+            else:
+                mask = annotation
+            if i in valid_masks and annotation.get('score', 0) > adaptive_score:
                 onemask[mask] = 255
         return onemask
 
