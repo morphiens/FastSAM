@@ -448,7 +448,8 @@ class FastSAMPrompt:
         return np.array([onemask])
 
     def point_prompt_mask(self, foreground=None, blade_edge_mask=None,
-                          conf=None, debug_name=""):  # numpy
+                          conf=None, debug_name="",
+                          for_block_face_image=False):  # numpy
         if self.results is None:
             return None
         masks = self._format_results(self.results[0], 0)
@@ -467,11 +468,25 @@ class FastSAMPrompt:
             this_mask[mask] = 1
 
             # check if sure background
-            zero_top = cv2.countNonZero(this_mask[:, 0])/w
-            zero_bottom = cv2.countNonZero(this_mask[:, -1])/w
-            if zero_top > 0.5 or zero_bottom > 0.5:
-                logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as zero_top={zero_top:.2f}>0.5 or zero_bottom={zero_bottom:.2f}>0.5")
+            nonzero_left = cv2.countNonZero(this_mask[:, 0])/h
+            nonzero_right = cv2.countNonZero(this_mask[:, -1])/h
+            nonzero_top = cv2.countNonZero(this_mask[0, :]) / w
+            nonzero_bottom = cv2.countNonZero(this_mask[-1, :]) / w
+            if nonzero_left > 0.5 or nonzero_right > 0.5:
+                logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0.5 or "
+                             f"nonzero_right={nonzero_right:.2f}>0.5")
                 continue
+
+            if for_block_face_image:
+                if nonzero_top > 0 or nonzero_bottom > 0 or nonzero_left > 0 or nonzero_right > 0:
+                    logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0 or "
+                                 f"nonzero_right={nonzero_right:.2f}>0 or nonzero_top={nonzero_top:.2f}>0 or "
+                                 f"nonzero_bottom={nonzero_bottom:.2f}>0")
+                    continue
+
+                if annotation['area'] > 200000:
+                    logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as area > 200K")
+                    continue
 
             if blade_edge_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=blade_edge_mask)
@@ -494,7 +509,7 @@ class FastSAMPrompt:
         scores = [m.get('score', 0) for i, m in enumerate(masks) if i in valid_masks]
         adaptive_score = 0
         if len(scores) > 1:
-            adaptive_score = float(min(scores) + (max(scores) - min(scores)) * 0.8)
+            adaptive_score = float(min(scores) + (max(scores) - min(scores)) * 0.7)
         logging.info(f"valid_masks {debug_name} {valid_masks} {[round(float(a), 2) for a in scores]} {adaptive_score}")
         for i, annotation in enumerate(masks):
             if type(annotation) == dict:
