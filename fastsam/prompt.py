@@ -472,9 +472,14 @@ class FastSAMPrompt:
             nonzero_right = cv2.countNonZero(this_mask[:, -1])/h
             nonzero_top = cv2.countNonZero(this_mask[0, :]) / w
             nonzero_bottom = cv2.countNonZero(this_mask[-1, :]) / w
-            if nonzero_left > 0.5 or nonzero_right > 0.5:
+            if nonzero_left > 0.7 or nonzero_right > 0.7:
                 logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0.5 or "
                              f"nonzero_right={nonzero_right:.2f}>0.5")
+                continue
+
+            if nonzero_top > 0.95 or nonzero_bottom > 0.95:
+                logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_top={nonzero_top:.2f}>0.95 or "
+                             f"nonzero_bottom={nonzero_bottom:.2f}>0.95")
                 continue
 
             if for_block_face_image:
@@ -499,17 +504,16 @@ class FastSAMPrompt:
             if foreground is not None:
                 intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
                 ovap = int(100 * (cv2.countNonZero(intr) / cv2.countNonZero(this_mask)))
+                logging.info(f"[FG Overlap] {i}/{len(masks)} as intersection={ovap} ")
                 if ovap > 5:
-                    # onemask[mask] = 255
                     valid_masks.append(i)
             else:
-                # onemask[mask] = 255
                 valid_masks.append(i)
 
         scores = [m.get('score', 0) for i, m in enumerate(masks) if i in valid_masks]
         adaptive_score = 0
         if len(scores) > 1:
-            adaptive_score = float(min(scores) + (max(scores) - min(scores)) * 0.7)
+            adaptive_score = float(min(scores) + (max(scores) - min(scores)) * 0.0)
         logging.info(f"valid_masks {debug_name} {valid_masks} {[round(float(a), 2) for a in scores]} {adaptive_score}")
         for i, annotation in enumerate(masks):
             if type(annotation) == dict:
