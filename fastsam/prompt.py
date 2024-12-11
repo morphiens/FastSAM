@@ -448,8 +448,9 @@ class FastSAMPrompt:
         return np.array([onemask])
 
     def point_prompt_mask(self, foreground=None, blade_edge_mask=None,
+                          sure_bg_mask=None,
                           conf=None, debug_name="",
-                          for_block_face_image=False):  # numpy
+                          no_touching_boundary=False):  # numpy
         if self.results is None:
             return None
         masks = self._format_results(self.results[0], 0)
@@ -472,41 +473,50 @@ class FastSAMPrompt:
             nonzero_right = cv2.countNonZero(this_mask[:, -1])/h
             nonzero_top = cv2.countNonZero(this_mask[0, :]) / w
             nonzero_bottom = cv2.countNonZero(this_mask[-1, :]) / w
+            logging.info(f"[{i}/{len(masks)}] {nonzero_top:.2f} {nonzero_bottom:.2f} {nonzero_left:.2f} {nonzero_right:.2f}")
             if nonzero_left > 0.7 or nonzero_right > 0.7:
                 logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0.5 or "
                              f"nonzero_right={nonzero_right:.2f}>0.5")
                 continue
 
             if nonzero_top > 0.95 or nonzero_bottom > 0.95:
-                logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_top={nonzero_top:.2f}>0.95 or "
+                logging.info(f"2.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_top={nonzero_top:.2f}>0.95 or "
                              f"nonzero_bottom={nonzero_bottom:.2f}>0.95")
                 continue
 
-            if for_block_face_image:
+            if no_touching_boundary:
                 if nonzero_top > 0 or nonzero_bottom > 0 or nonzero_left > 0 or nonzero_right > 0:
-                    logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0 or "
+                    logging.info(f"3.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0 or "
                                  f"nonzero_right={nonzero_right:.2f}>0 or nonzero_top={nonzero_top:.2f}>0 or "
                                  f"nonzero_bottom={nonzero_bottom:.2f}>0")
                     continue
 
-                if annotation['area'] > 200000:
-                    logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as area > 200K")
-                    continue
+                # if annotation['area'] > 200000:
+                #     logging.info(f"4.[Sure BG] Skipped mask {i}/{len(masks)} as area > 200K")
+                #     continue
 
             if blade_edge_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=blade_edge_mask)
                 bld_white_percent = cv2.countNonZero(bld)/(cv2.countNonZero(blade_edge_mask) + 0.0001)
                 if bld_white_percent < 0.5:
-                    logging.info(f"2.[Sure FG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
+                    logging.info(f"5.[Sure FG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
                                  f"bld_white_percent={bld_white_percent}<0.5")
+                    continue
+
+            if sure_bg_mask is not None:
+                bld = cv2.bitwise_and(this_mask, this_mask, mask=sure_bg_mask)
+                bld_white_percent = cv2.countNonZero(bld)/(cv2.countNonZero(blade_edge_mask) + 0.0001)
+                if bld_white_percent > 0:
+                    logging.info(f"5.[Sure BG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
+                                 f"bld_white_percent={bld_white_percent}>0")
                     continue
 
             if foreground is not None:
                 intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
                 ovap = int(100 * (cv2.countNonZero(intr) / cv2.countNonZero(this_mask)))
-                logging.info(f"[FG Overlap] {i}/{len(masks)} as intersection={ovap} ")
                 if ovap > 5:
                     valid_masks.append(i)
+                    logging.info(f"[Valid Mask] {i}/{len(masks)} as intersection={ovap}>5 ")
             else:
                 valid_masks.append(i)
 
@@ -520,7 +530,7 @@ class FastSAMPrompt:
                 mask = annotation['segmentation']
             else:
                 mask = annotation
-            if i in valid_masks and annotation.get('score', 0) > adaptive_score:
+            if i in valid_masks and annotation.get('score', 0) >= adaptive_score:
                 onemask[mask] = 255
         return onemask
 
