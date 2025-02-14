@@ -513,7 +513,7 @@ class FastSAMPrompt:
 
             if foreground is not None:
                 intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
-                ovap = int(100 * (cv2.countNonZero(intr) / cv2.countNonZero(this_mask)))
+                ovap = int(100 * (cv2.countNonZero(intr) / (cv2.countNonZero(this_mask) + 0.00001)))
                 if ovap > 15:
                     valid_masks.append(i)
                     logging.info(f"[Valid Mask] {i}/{len(masks)} as intersection={ovap}>5 ")
