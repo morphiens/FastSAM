@@ -74,6 +74,8 @@ class FastSAMPrompt:
     def _get_bbox_from_mask(self, mask):
         mask = mask.astype(np.uint8)
         contours, hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if len(contours) <= 0:
+            return [0, 0, 0, 0]
         x1, y1, w, h = cv2.boundingRect(contours[0])
         x2, y2 = x1 + w, y1 + h
         if len(contours) > 1:
@@ -548,7 +550,7 @@ class FastSAMPrompt:
             bbox_onemask = self._get_bbox_from_mask(onemask)
             bbox_area_onemask = (bbox_onemask[3] - bbox_onemask[1]) * (bbox_onemask[2] - bbox_onemask[0])
 
-            if top_row != -1:
+            if top_row != -1 and bbox_area_onemask > 0:
                 for i, annotation in enumerate(masks):
                     if i in selected_masks:
                         continue
