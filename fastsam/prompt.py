@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
-from .utils import image_to_np_ndarray
 from PIL import Image
 
+from fastsam.utils import image_to_np_ndarray
 
 class FastSAMPrompt:
 
@@ -450,15 +450,18 @@ class FastSAMPrompt:
     def point_prompt_mask(self, foreground=None, blade_edge_mask=None,
                           sure_bg_mask=None,
                           conf=None, debug_name="",
-                          no_touching_boundary=False):  # numpy
+                          no_touching_boundary=False,
+                          check_no_touching_top=False):  # numpy
         if self.results is None:
             return None
+        is_bad_reason = None
         masks = self._format_results(self.results[0], 0)
         h = masks[0]['segmentation'].shape[0]
         w = masks[0]['segmentation'].shape[1]
         onemask = np.zeros((h, w)).astype(np.uint8)
         masks = sorted(masks, key=lambda x: x['area'], reverse=True)
         valid_masks = []
+        selected_masks = []
         for i, annotation in enumerate(masks):
             if type(annotation) == dict:
                 mask = annotation['segmentation']
@@ -531,8 +534,41 @@ class FastSAMPrompt:
             else:
                 mask = annotation
             if i in valid_masks and annotation.get('score', 0) >= adaptive_score:
+                selected_masks.append(i)
                 onemask[mask] = 255
-        return onemask
+
+        if check_no_touching_top:
+            top_row = -1
+            for row in range(h):
+                top_white_pixels = np.where(onemask[row, :] > 0)[0]  # Indices of white pixels in the row
+                if len(top_white_pixels) > 10:
+                    top_row = row
+                    break
+
+            bbox_onemask = self._get_bbox_from_mask(onemask)
+            bbox_area_onemask = (bbox_onemask[3] - bbox_onemask[1]) * (bbox_onemask[2] - bbox_onemask[0])
+
+            if top_row != -1:
+                for i, annotation in enumerate(masks):
+                    if i in selected_masks:
+                        continue
+                    mask = annotation['segmentation'] if isinstance(annotation, dict) else annotation
+                    bbox = self._get_bbox_from_mask(mask)
+                    bbox_area = (bbox[3] - bbox[1]) * (bbox[2] - bbox[0])
+                    area_ratio = abs(bbox_area - bbox_area_onemask) / max(bbox_area, bbox_area_onemask)
+                    if area_ratio <= 0.1:
+                        mask_boundary = np.where(mask > 0)  # Extract boundary of the mask
+                        if mask_boundary[0].size > 0:
+                            mask_cropped = mask[top_row:top_row + 1, :].astype(np.uint8)
+                            onemask_cropped = onemask[top_row:top_row + 1, :].astype(np.uint8)
+                            intersection = cv2.bitwise_and(mask_cropped, onemask_cropped)
+                            if np.count_nonzero(intersection) > 0:
+                                logging.info(f"Mask {i} overlaps with top region.")
+                                is_bad_reason = "Top overlaps with different similar shaped mask"
+                                break
+
+        is_good = is_bad_reason is None
+        return is_good, is_bad_reason, onemask
 
     def text_prompt(self, text):
         if self.results == None:
