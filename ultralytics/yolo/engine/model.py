@@ -3,6 +3,7 @@
 import sys
 from pathlib import Path
 from typing import Union
+import torch
 
 from ultralytics import yolo  # noqa
 from ultralytics.nn.tasks import (ClassificationModel, DetectionModel, PoseModel, SegmentationModel,
