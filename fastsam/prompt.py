@@ -456,7 +456,7 @@ class FastSAMPrompt:
                           no_touching_boundary=False,
                           check_no_touching_top=False):  # numpy
         if self.results is None:
-            return None
+            return False, None, None
         is_bad_reason = None
         masks = self._format_results(self.results[0], 0)
         h = masks[0]['segmentation'].shape[0]
