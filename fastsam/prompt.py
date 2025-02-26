@@ -449,6 +449,7 @@ class FastSAMPrompt:
 
     def point_prompt_mask(self, foreground=None, blade_edge_mask=None,
                           sure_bg_mask=None,
+                          sure_fg_mask=None,
                           conf=None, debug_name="",
                           no_touching_boundary=False):  # numpy
         if self.results is None:
@@ -509,6 +510,12 @@ class FastSAMPrompt:
                 if bld_white_percent > 0:
                     logging.info(f"5.[Sure BG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
                                  f"bld_white_percent={bld_white_percent}>0")
+                    continue
+
+            if sure_fg_mask is not None:
+                sure_fg = cv2.bitwise_and(this_mask, this_mask, mask=sure_fg_mask)
+                if cv2.countNonZero(sure_fg) == 0:
+                    logging.info(f"5.[Sure FG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(sure_fg)} == 0")
                     continue
 
             if foreground is not None:
