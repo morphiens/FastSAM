@@ -481,34 +481,34 @@ class FastSAMPrompt:
             nonzero_right = cv2.countNonZero(this_mask[:, -1])/h
             nonzero_top = cv2.countNonZero(this_mask[0, :]) / w
             nonzero_bottom = cv2.countNonZero(this_mask[-1, :]) / w
-            logging.info(f"[{i}/{len(masks)}] {nonzero_top:.2f} {nonzero_bottom:.2f} {nonzero_left:.2f} {nonzero_right:.2f}")
+            logging.debug(f"[{i}/{len(masks)}] {nonzero_top:.2f} {nonzero_bottom:.2f} {nonzero_left:.2f} {nonzero_right:.2f}")
             if no_close_to_boundary:
                 if nonzero_left > 0.7 or nonzero_right > 0.7:
-                    logging.info(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0.5 or "
+                    logging.debug(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0.5 or "
                                  f"nonzero_right={nonzero_right:.2f}>0.5")
                     continue
 
                 if nonzero_top > 0.95 or nonzero_bottom > 0.95:
-                    logging.info(f"2.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_top={nonzero_top:.2f}>0.95 or "
+                    logging.debug(f"2.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_top={nonzero_top:.2f}>0.95 or "
                                  f"nonzero_bottom={nonzero_bottom:.2f}>0.95")
                     continue
 
             if no_touching_boundary:
                 if nonzero_top > 0 or nonzero_bottom > 0 or nonzero_left > 0 or nonzero_right > 0:
-                    logging.info(f"3.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0 or "
+                    logging.debug(f"3.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0 or "
                                  f"nonzero_right={nonzero_right:.2f}>0 or nonzero_top={nonzero_top:.2f}>0 or "
                                  f"nonzero_bottom={nonzero_bottom:.2f}>0")
                     continue
 
                 # if annotation['area'] > 200000:
-                #     logging.info(f"4.[Sure BG] Skipped mask {i}/{len(masks)} as area > 200K")
+                #     logging.debug(f"4.[Sure BG] Skipped mask {i}/{len(masks)} as area > 200K")
                 #     continue
 
             if blade_edge_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=blade_edge_mask)
                 bld_white_percent = cv2.countNonZero(bld)/(cv2.countNonZero(blade_edge_mask) + 0.0001)
                 if bld_white_percent < 0.5:
-                    logging.info(f"5.[Sure FG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
+                    logging.debug(f"5.[Sure FG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
                                  f"bld_white_percent={bld_white_percent}<0.5")
                     continue
 
@@ -516,17 +516,17 @@ class FastSAMPrompt:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=sure_bg_mask)
                 bld_white_percent = cv2.countNonZero(bld)/(cv2.countNonZero(blade_edge_mask) + 0.0001)
                 if bld_white_percent > 0:
-                    logging.info(f"5.[Sure BG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
+                    logging.debug(f"5.[Sure BG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
                                  f"bld_white_percent={bld_white_percent}>0")
                     continue
 
             if sure_fg_mask is not None:
                 sure_fg = cv2.bitwise_and(this_mask, this_mask, mask=sure_fg_mask)
                 fg_percent = cv2.countNonZero(sure_fg) / (cv2.countNonZero(sure_fg_mask) + 0.0001)
-                logging.info(
+                logging.debug(
                     f" {i}/{len(masks)} as intersection={cv2.countNonZero(sure_fg)}, {fg_percent:.2f}%")
                 if fg_percent <= percent_cover_for_fg_mask_to_consider_valid/100.0:
-                    logging.info(f"5.[Sure FG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(sure_fg)} == 0")
+                    logging.debug(f"5.[Sure FG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(sure_fg)} == 0")
                     continue
 
             if foreground is not None:
@@ -534,7 +534,7 @@ class FastSAMPrompt:
                 ovap = int(100 * (cv2.countNonZero(intr) / (cv2.countNonZero(this_mask) + 0.00001)))
                 if ovap > 15:
                     valid_masks.append(i)
-                    logging.info(f"[Valid Mask] {i}/{len(masks)} as intersection={ovap}>5 ")
+                    logging.debug(f"[Valid Mask] {i}/{len(masks)} as intersection={ovap}>5 ")
             else:
                 valid_masks.append(i)
 
@@ -542,7 +542,7 @@ class FastSAMPrompt:
         adaptive_score = 0
         if len(scores) > 1:
             adaptive_score = float(min(scores) + (max(scores) - min(scores)) * 0.0)
-        logging.info(f"valid_masks {debug_name} {valid_masks} {[round(float(a), 2) for a in scores]} {adaptive_score}")
+        logging.debug(f"valid_masks {debug_name} {valid_masks} {[round(float(a), 2) for a in scores]} {adaptive_score}")
         for i, annotation in enumerate(masks):
             if type(annotation) == dict:
                 mask = annotation['segmentation']
@@ -578,7 +578,7 @@ class FastSAMPrompt:
                             onemask_cropped = onemask[top_row:top_row + 1, :].astype(np.uint8)
                             intersection = cv2.bitwise_and(mask_cropped, onemask_cropped)
                             if np.count_nonzero(intersection) > 0:
-                                logging.info(f"Mask {i} overlaps with top region.")
+                                logging.debug(f"Mask {i} overlaps with top region.")
                                 is_bad_reason = "Top overlaps with different similar shaped mask"
                                 break
 
