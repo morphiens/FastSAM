@@ -421,6 +421,7 @@ class FastSAMPrompt:
         if self.results == None:
             return []
         masks = self._format_results(self.results[0], 0)
+        masks = sorted(masks, key=lambda x: x.get('area', 0), reverse=True)
         return masks
 
     def point_prompt(self, points, pointlabel):  # numpy
