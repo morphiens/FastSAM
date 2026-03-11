@@ -50,6 +50,7 @@ class FastSAM(YOLO):
         try:
             return self.predictor(source, stream=stream)
         except Exception as e:
+            LOGGER.error(f"FastSAM predict failed: {e}")
             return None
 
     def train(self, **kwargs):
