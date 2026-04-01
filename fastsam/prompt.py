@@ -456,7 +456,7 @@ class FastSAMPrompt:
                           no_touching_boundary=False,
                           no_close_to_boundary=True,
                           check_no_touching_top=False,
-                          percent_cover_for_fg_mask_to_consider_valid=0.01):  # numpy
+                          percent_cover_for_fg_mask_to_consider_valid=10):  # numpy
         if self.results is None:
             return False, None, None
         is_bad_reason = None
@@ -481,62 +481,62 @@ class FastSAMPrompt:
             nonzero_right = cv2.countNonZero(this_mask[:, -1])/h
             nonzero_top = cv2.countNonZero(this_mask[0, :]) / w
             nonzero_bottom = cv2.countNonZero(this_mask[-1, :]) / w
-            logging.debug(f"[{i}/{len(masks)}] {nonzero_top:.2f} {nonzero_bottom:.2f} {nonzero_left:.2f} {nonzero_right:.2f}")
+            tag = f"Mask {i}/{len(masks)}"
+            logging.debug(f"[{tag}] boundary: top={nonzero_top:.2f} bottom={nonzero_bottom:.2f} "
+                         f"left={nonzero_left:.2f} right={nonzero_right:.2f}")
+
             if no_close_to_boundary:
                 if nonzero_left > 0.7 or nonzero_right > 0.7:
-                    logging.debug(f"1.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0.5 or "
-                                 f"nonzero_right={nonzero_right:.2f}>0.5")
+                    logging.debug(f"[REJECTED] {tag}: close to L/R boundary "
+                                 f"(left={nonzero_left:.2f}, right={nonzero_right:.2f}, thresh=0.7)")
                     continue
-
                 if nonzero_top > 0.95 or nonzero_bottom > 0.95:
-                    logging.debug(f"2.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_top={nonzero_top:.2f}>0.95 or "
-                                 f"nonzero_bottom={nonzero_bottom:.2f}>0.95")
+                    logging.debug(f"[REJECTED] {tag}: close to T/B boundary "
+                                 f"(top={nonzero_top:.2f}, bottom={nonzero_bottom:.2f}, thresh=0.95)")
                     continue
 
             if no_touching_boundary:
                 if nonzero_top > 0 or nonzero_bottom > 0 or nonzero_left > 0 or nonzero_right > 0:
-                    logging.debug(f"3.[Sure BG] Skipped mask {i}/{len(masks)} as nonzero_left={nonzero_left:.2f}>0 or "
-                                 f"nonzero_right={nonzero_right:.2f}>0 or nonzero_top={nonzero_top:.2f}>0 or "
-                                 f"nonzero_bottom={nonzero_bottom:.2f}>0")
+                    logging.debug(f"[REJECTED] {tag}: touches boundary "
+                                 f"(top={nonzero_top:.2f}, bottom={nonzero_bottom:.2f}, "
+                                 f"left={nonzero_left:.2f}, right={nonzero_right:.2f})")
                     continue
-
-                # if annotation['area'] > 200000:
-                #     logging.debug(f"4.[Sure BG] Skipped mask {i}/{len(masks)} as area > 200K")
-                #     continue
 
             if blade_edge_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=blade_edge_mask)
-                bld_white_percent = cv2.countNonZero(bld)/(cv2.countNonZero(blade_edge_mask) + 0.0001)
+                bld_white_percent = cv2.countNonZero(bld) / (cv2.countNonZero(blade_edge_mask) + 0.0001)
                 if bld_white_percent < 0.5:
-                    logging.debug(f"5.[Sure FG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
-                                 f"bld_white_percent={bld_white_percent}<0.5")
+                    logging.debug(f"[REJECTED] {tag}: low blade overlap "
+                                 f"(blade_pct={bld_white_percent:.2f}, thresh=0.5)")
                     continue
 
             if sure_bg_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=sure_bg_mask)
-                bld_white_percent = cv2.countNonZero(bld)/(cv2.countNonZero(blade_edge_mask) + 0.0001)
+                bld_white_percent = cv2.countNonZero(bld) / (cv2.countNonZero(sure_bg_mask) + 0.0001)
                 if bld_white_percent > 0:
-                    logging.debug(f"5.[Sure BG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(bld)} "
-                                 f"bld_white_percent={bld_white_percent}>0")
+                    logging.debug(f"[REJECTED] {tag}: overlaps sure-BG mask "
+                                 f"(bg_overlap_pct={bld_white_percent:.2f})")
                     continue
 
             if sure_fg_mask is not None:
                 sure_fg = cv2.bitwise_and(this_mask, this_mask, mask=sure_fg_mask)
                 fg_percent = cv2.countNonZero(sure_fg) / (cv2.countNonZero(sure_fg_mask) + 0.0001)
-                logging.debug(
-                    f" {i}/{len(masks)} as intersection={cv2.countNonZero(sure_fg)}, {fg_percent:.2f}%")
-                if fg_percent <= percent_cover_for_fg_mask_to_consider_valid/100.0:
-                    logging.debug(f"5.[Sure FG] Skipped mask {i}/{len(masks)} as intersection={cv2.countNonZero(sure_fg)} == 0")
+                fg_thresh = percent_cover_for_fg_mask_to_consider_valid / 100.0
+                if fg_percent <= fg_thresh:
+                    logging.debug(f"[REJECTED] {tag}: insufficient FG coverage "
+                                 f"(fg_pct={fg_percent:.2f}, thresh={fg_thresh:.4f})")
                     continue
+                logging.debug(f"[  PASSED] {tag}: FG coverage check (fg_pct={fg_percent:.2f})")
 
             if foreground is not None:
                 intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
                 ovap = int(100 * (cv2.countNonZero(intr) / (cv2.countNonZero(this_mask) + 0.00001)))
-                if ovap > 15:
-                    valid_masks.append(i)
-                    logging.debug(f"[Valid Mask] {i}/{len(masks)} as intersection={ovap}>5 ")
-            else:
-                valid_masks.append(i)
+                if ovap <= 15:
+                    logging.debug(f"[REJECTED] {tag}: low foreground overlap (ovap={ovap}%, thresh=15%)")
+                    continue
+
+            valid_masks.append(i)
+            logging.debug(f"[ACCEPTED] {tag}")
 
         scores = [m.get('score', 0) for i, m in enumerate(masks) if i in valid_masks]
         adaptive_score = 0
