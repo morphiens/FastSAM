@@ -31,8 +31,12 @@ class FastSAMPredictor(DetectionPredictor):
         full_box = full_box.view(1, -1)
         critical_iou_index = bbox_iou(full_box[0][:4], p[0][:, :4], iou_thres=0.9, image_shape=img.shape[2:])
         if critical_iou_index.numel() != 0:
-            full_box[0][4] = p[0][critical_iou_index][:,4]
-            full_box[0][6:] = p[0][critical_iou_index][:,6:]
+            # critical_iou_index is 1-D; advanced-indexed slices are [N, ...] not scalar/row,
+            # so the original assignments raised a shape-expand error. Use the first match
+            # (highest objectness after NMS) to populate full_box, then overwrite all matches.
+            first = critical_iou_index[0]
+            full_box[0, 4] = p[0][first, 4]
+            full_box[0, 6:] = p[0][first, 6:]
             p[0][critical_iou_index] = full_box
         
         proto = preds[1][-1] if len(preds[1]) == 3 else preds[1]  # second output is len 3 if pt, but only 1 if exported
