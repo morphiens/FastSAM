@@ -420,9 +420,54 @@ class FastSAMPrompt:
     def get_masks(self):
         if self.results == None:
             return []
+        if getattr(self, 'expanded_masks', None):
+            return self.expanded_masks
         masks = self._format_results(self.results[0], 0)
         masks = sorted(masks, key=lambda x: x.get('area', 0), reverse=True)
         return masks
+
+    @staticmethod
+    def _split_segmentation_into_blobs(segmentation):
+        mask_u8 = np.asarray(segmentation).astype(np.uint8)
+        num_labels, labels = cv2.connectedComponents(mask_u8)
+        if num_labels <= 2:
+            return [np.asarray(segmentation, dtype=bool)]
+        blobs = []
+        for label in range(1, num_labels):
+            blob = labels == label
+            if np.any(blob):
+                blobs.append(blob)
+        return blobs if blobs else [np.asarray(segmentation, dtype=bool)]
+
+    def _expand_masks_for_blobs(self, masks, split_multi_blob_masks):
+        if not split_multi_blob_masks:
+            self.expanded_masks = None
+            return masks
+
+        expanded = []
+        for i, annotation in enumerate(masks):
+            if isinstance(annotation, dict):
+                seg = annotation['segmentation']
+                base = dict(annotation)
+            else:
+                seg = annotation
+                base = {'segmentation': seg}
+            blobs = self._split_segmentation_into_blobs(seg)
+            parent_id = base.get('id', i)
+            for blob_idx, blob in enumerate(blobs):
+                entry = dict(base)
+                entry['segmentation'] = blob
+                entry['area'] = int(blob.sum())
+                if len(blobs) > 1:
+                    entry['id'] = f"{parent_id}_b{blob_idx}"
+                    entry['parent_mask_index'] = i
+                    entry['blob_index'] = blob_idx
+                    entry['blob_count'] = len(blobs)
+                expanded.append(entry)
+
+        expanded.sort(key=lambda x: x['area'], reverse=True)
+        self.expanded_masks = expanded
+        return expanded
 
     def point_prompt(self, points, pointlabel):  # numpy
         if self.results == None:
@@ -439,8 +484,10 @@ class FastSAMPrompt:
         for i, annotation in enumerate(masks):
             if type(annotation) == dict:
                 mask = annotation['segmentation']
+                mask_id = annotation.get('id', i)
             else:
                 mask = annotation
+                mask_id = i
             for i, point in enumerate(points):
                 if mask[point[1], point[0]] == 1 and pointlabel[i] == 1:
                     onemask[mask] = 1
@@ -456,7 +503,8 @@ class FastSAMPrompt:
                           no_touching_boundary=False,
                           no_close_to_boundary=True,
                           check_no_touching_top=False,
-                          percent_cover_for_fg_mask_to_consider_valid=10):  # numpy
+                          percent_cover_for_fg_mask_to_consider_valid=10,
+                          split_multi_blob_masks=False):  # numpy
         if self.results is None:
             return False, None, None
         is_bad_reason = None
@@ -465,57 +513,84 @@ class FastSAMPrompt:
         w = masks[0]['segmentation'].shape[1]
         onemask = np.zeros((h, w)).astype(np.uint8)
         masks = sorted(masks, key=lambda x: x['area'], reverse=True)
+        masks = self._expand_masks_for_blobs(masks, split_multi_blob_masks)
         valid_masks = []
         selected_masks = []
+        self.mask_filter_decisions = {}
+
+        def _set_decision(idx, mask_id, entry):
+            self.mask_filter_decisions[idx] = entry
+            if mask_id is not None:
+                self.mask_filter_decisions[mask_id] = entry
+
+        def _reject_mask(idx, reason, mask_id=None):
+            _set_decision(idx, mask_id, {"status": "REJECTED", "reason": reason})
+
         for i, annotation in enumerate(masks):
             if type(annotation) == dict:
                 mask = annotation['segmentation']
+                mask_id = annotation.get('id', i)
             else:
                 mask = annotation
+                mask_id = i
 
             this_mask = np.zeros((h, w))
             this_mask[mask] = 1
 
+            blob_suffix = ""
+            if isinstance(annotation, dict) and annotation.get('blob_count', 1) > 1:
+                blob_suffix = (
+                    f" blob {annotation['blob_index'] + 1}/{annotation['blob_count']}"
+                    f" (sam #{annotation['parent_mask_index']})"
+                )
+            tag = f"Mask {i}/{len(masks)}{blob_suffix}"
             # check if sure background
             nonzero_left = cv2.countNonZero(this_mask[:, 0])/h
             nonzero_right = cv2.countNonZero(this_mask[:, -1])/h
             nonzero_top = cv2.countNonZero(this_mask[0, :]) / w
             nonzero_bottom = cv2.countNonZero(this_mask[-1, :]) / w
-            tag = f"Mask {i}/{len(masks)}"
             logging.debug(f"[{tag}] boundary: top={nonzero_top:.2f} bottom={nonzero_bottom:.2f} "
                          f"left={nonzero_left:.2f} right={nonzero_right:.2f}")
 
             if no_close_to_boundary:
                 if nonzero_left > 0.7 or nonzero_right > 0.7:
-                    logging.debug(f"[REJECTED] {tag}: close to L/R boundary "
-                                 f"(left={nonzero_left:.2f}, right={nonzero_right:.2f}, thresh=0.7)")
+                    reason = (f"close to L/R boundary "
+                              f"(left={nonzero_left:.2f}, right={nonzero_right:.2f}, thresh=0.7)")
+                    _reject_mask(i, reason, mask_id)
+                    logging.debug(f"[REJECTED] {tag}: {reason}")
                     continue
                 if nonzero_top > 0.95 or nonzero_bottom > 0.95:
-                    logging.debug(f"[REJECTED] {tag}: close to T/B boundary "
-                                 f"(top={nonzero_top:.2f}, bottom={nonzero_bottom:.2f}, thresh=0.95)")
+                    reason = (f"close to T/B boundary "
+                              f"(top={nonzero_top:.2f}, bottom={nonzero_bottom:.2f}, thresh=0.95)")
+                    _reject_mask(i, reason, mask_id)
+                    logging.debug(f"[REJECTED] {tag}: {reason}")
                     continue
 
             if no_touching_boundary:
                 if nonzero_top > 0 or nonzero_bottom > 0 or nonzero_left > 0 or nonzero_right > 0:
-                    logging.debug(f"[REJECTED] {tag}: touches boundary "
-                                 f"(top={nonzero_top:.2f}, bottom={nonzero_bottom:.2f}, "
-                                 f"left={nonzero_left:.2f}, right={nonzero_right:.2f})")
+                    reason = (f"touches boundary "
+                              f"(top={nonzero_top:.2f}, bottom={nonzero_bottom:.2f}, "
+                              f"left={nonzero_left:.2f}, right={nonzero_right:.2f})")
+                    _reject_mask(i, reason, mask_id)
+                    logging.debug(f"[REJECTED] {tag}: {reason}")
                     continue
 
             if blade_edge_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=blade_edge_mask)
                 bld_white_percent = cv2.countNonZero(bld) / (cv2.countNonZero(blade_edge_mask) + 0.0001)
                 if bld_white_percent < 0.5:
-                    logging.debug(f"[REJECTED] {tag}: low blade overlap "
-                                 f"(blade_pct={bld_white_percent:.2f}, thresh=0.5)")
+                    reason = f"low blade overlap (blade_pct={bld_white_percent * 100:.2f}%, thresh=50%)"
+                    _reject_mask(i, reason, mask_id)
+                    logging.debug(f"[REJECTED] {tag}: {reason}")
                     continue
 
             if sure_bg_mask is not None:
                 bld = cv2.bitwise_and(this_mask, this_mask, mask=sure_bg_mask)
                 bld_white_percent = cv2.countNonZero(bld) / (cv2.countNonZero(sure_bg_mask) + 0.0001)
                 if bld_white_percent > 0:
-                    logging.debug(f"[REJECTED] {tag}: overlaps sure-BG mask "
-                                 f"(bg_overlap_pct={bld_white_percent:.2f})")
+                    reason = f"overlaps sure-BG mask (bg_overlap_pct={bld_white_percent * 100:.2f}%)"
+                    _reject_mask(i, reason, mask_id)
+                    logging.debug(f"[REJECTED] {tag}: {reason}")
                     continue
 
             if sure_fg_mask is not None:
@@ -523,19 +598,31 @@ class FastSAMPrompt:
                 fg_percent = cv2.countNonZero(sure_fg) / (cv2.countNonZero(sure_fg_mask) + 0.0001)
                 fg_thresh = percent_cover_for_fg_mask_to_consider_valid / 100.0
                 if fg_percent <= fg_thresh:
-                    logging.debug(f"[REJECTED] {tag}: insufficient FG coverage "
-                                 f"(fg_pct={fg_percent:.2f}, thresh={fg_thresh:.4f})")
+                    reason = (
+                        f"insufficient FG coverage (fg_pct={fg_percent * 100:.2f}%, "
+                        f"thresh={percent_cover_for_fg_mask_to_consider_valid}%)"
+                    )
+                    _reject_mask(i, reason, mask_id)
+                    logging.debug(f"[REJECTED] {tag}: {reason}")
                     continue
-                logging.debug(f"[  PASSED] {tag}: FG coverage check (fg_pct={fg_percent:.2f})")
+                logging.debug(f"[  PASSED] {tag}: FG coverage check (fg_pct={fg_percent * 100:.2f}%)")
 
             if foreground is not None:
                 intr = cv2.bitwise_and(this_mask, this_mask, mask=foreground)
                 ovap = int(100 * (cv2.countNonZero(intr) / (cv2.countNonZero(this_mask) + 0.00001)))
                 if ovap <= 15:
-                    logging.debug(f"[REJECTED] {tag}: low foreground overlap (ovap={ovap}%, thresh=15%)")
+                    reason = f"low foreground overlap (ovap={ovap}%, thresh=15%)"
+                    _reject_mask(i, reason, mask_id)
+                    logging.debug(f"[REJECTED] {tag}: {reason}")
                     continue
 
+            accept_reason = "passed all filters"
+            if sure_fg_mask is not None:
+                accept_reason += f" (fg_pct={fg_percent * 100:.2f}%)"
+            if foreground is not None:
+                accept_reason += f" (ovap={ovap}%)"
             valid_masks.append(i)
+            _set_decision(i, mask_id, {"status": "ACCEPTED", "reason": accept_reason})
             logging.debug(f"[ACCEPTED] {tag}")
 
         scores = [m.get('score', 0) for i, m in enumerate(masks) if i in valid_masks]
@@ -546,11 +633,26 @@ class FastSAMPrompt:
         for i, annotation in enumerate(masks):
             if type(annotation) == dict:
                 mask = annotation['segmentation']
+                mask_id = annotation.get('id', i)
             else:
                 mask = annotation
-            if i in valid_masks and annotation.get('score', 0) >= adaptive_score:
+                mask_id = i
+            if i not in valid_masks:
+                continue
+            score = annotation.get('score', 0)
+            if score >= adaptive_score:
                 selected_masks.append(i)
                 onemask[mask] = 255
+                _set_decision(i, mask_id, {
+                    "status": "SELECTED",
+                    "reason": f"score={score:.2f} >= adaptive={adaptive_score:.2f}; "
+                              f"{self.mask_filter_decisions[i]['reason']}",
+                })
+            else:
+                _set_decision(i, mask_id, {
+                    "status": "REJECTED",
+                    "reason": f"score={score:.2f} < adaptive={adaptive_score:.2f}",
+                })
 
         if check_no_touching_top:
             top_row = -1
