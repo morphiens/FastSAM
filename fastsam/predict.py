@@ -50,7 +50,8 @@ class FastSAMPredictor(DetectionPredictor):
             if self.args.retina_masks:
                 if not isinstance(orig_imgs, torch.Tensor):
                     pred[:, :4] = ops.scale_boxes(img.shape[2:], pred[:, :4], orig_img.shape)
-                masks = ops.process_mask_native(proto[i], pred[:, 6:], pred[:, :4], orig_img.shape[:2])  # HWC
+                # uint8 0/1 masks built one at a time: same values, far less GPU memory
+                masks = ops.process_mask_native_u8(proto[i], pred[:, 6:], pred[:, :4], orig_img.shape[:2])  # HWC
             else:
                 masks = ops.process_mask(proto[i], pred[:, 6:], pred[:, :4], img.shape[2:], upsample=True)  # HWC
                 if not isinstance(orig_imgs, torch.Tensor):
