@@ -636,6 +636,40 @@ def process_mask_native(protos, masks_in, bboxes, shape):
     return masks.gt_(0)
 
 
+def process_mask_native_u8(protos, masks_in, bboxes, shape):
+    """
+    Same masks as process_mask_native, built one mask at a time and returned as uint8 (0/1).
+
+    process_mask_native upsamples every mask to full image size at once in float32 and then
+    makes a second full-size copy when cropping, so a call with many masks on a large image
+    briefly needs gigabytes of GPU memory. Here only one full-size float mask exists at a time,
+    and the result takes 1 byte per pixel instead of 4. Upsampling, cropping and the > 0 test
+    work on each mask independently, so the 0/1 values are identical.
+
+    Args:
+      protos (torch.Tensor): [mask_dim, mask_h, mask_w]
+      masks_in (torch.Tensor): [n, mask_dim], n is number of masks after nms
+      bboxes (torch.Tensor): [n, 4], n is number of masks after nms
+      shape (tuple): the size of the input image (h,w)
+
+    Returns:
+      masks (torch.Tensor): uint8 masks of 0/1 with dimensions [n, h, w]
+    """
+    c, mh, mw = protos.shape  # CHW
+    masks = (masks_in @ protos.float().view(c, -1)).view(-1, mh, mw)
+    gain = min(mh / shape[0], mw / shape[1])  # gain  = old / new
+    pad = (mw - shape[1] * gain) / 2, (mh - shape[0] * gain) / 2  # wh padding
+    top, left = int(pad[1]), int(pad[0])  # y, x
+    bottom, right = int(mh - pad[1]), int(mw - pad[0])
+    masks = masks[:, top:bottom, left:right]
+
+    out = torch.empty((masks.shape[0], *shape), dtype=torch.uint8, device=masks.device)
+    for i in range(masks.shape[0]):
+        mask = F.interpolate(masks[i][None, None], shape, mode='bilinear', align_corners=False)[0]  # 1HW
+        out[i] = crop_mask(mask, bboxes[i:i + 1])[0] > 0
+    return out
+
+
 def scale_coords(img1_shape, coords, img0_shape, ratio_pad=None, normalize=False):
     """
     Rescale segment coordinates (xyxy) from img1_shape to img0_shape
