@@ -628,7 +628,7 @@ class FastSAMPrompt:
         scores = [m.get('score', 0) for i, m in enumerate(masks) if i in valid_masks]
         adaptive_score = 0
         if len(scores) > 1:
-            adaptive_score = float(min(scores) + (max(scores) - min(scores)) * 0.0)
+            adaptive_score = float(min(scores) + (max(scores) - min(scores)) * 0.2)
         logging.debug(f"valid_masks {debug_name} {valid_masks} {[round(float(a), 2) for a in scores]} {adaptive_score}")
         for i, annotation in enumerate(masks):
             if type(annotation) == dict:
